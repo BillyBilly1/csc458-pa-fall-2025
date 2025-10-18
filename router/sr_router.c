@@ -295,9 +295,10 @@ void sr_handlepacket(struct sr_instance *sr, uint8_t *packet /* lent */,
 
   uint32_t next_hop_ip = best->gw.s_addr == 0 ? ip->ip_dst : best->gw.s_addr;
   struct sr_arpentry *entry = sr_arpcache_lookup(&sr->cache, next_hop_ip);
+  struct sr_if *out_if = sr_get_interface(sr, best->interface);
+
+
   if (entry) {
-    struct sr_if *out_if = sr_get_interface(sr, best->interface);
-    if (!out_if) return;
     memcpy(eth->ether_shost, out_if->addr, ETHER_ADDR_LEN);
     memcpy(eth->ether_dhost, entry->mac, ETHER_ADDR_LEN);
     sr_send_packet(sr, packet, len, out_if->name);

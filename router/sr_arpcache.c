@@ -15,6 +15,7 @@
 
 
 static void send_icmp_host_unreachable(struct sr_instance *sr, struct sr_packet *pkt) {
+
   if (!pkt || !pkt->buf || pkt->len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) {
     return;
   }
@@ -59,9 +60,11 @@ static void send_icmp_host_unreachable(struct sr_instance *sr, struct sr_packet 
   icmp_r->icmp_sum = cksum(icmp_r, sizeof(sr_icmp_t3_hdr_t));
 
   sr_send_packet(sr, buf, sizeof(buf), out_if->name);
+
 }
 
 static void send_arp_request(struct sr_instance *sr, struct sr_arpreq *req, time_t now) {
+
   struct sr_packet *first = req->packets;
   if (!first || !first->iface) {
     return;
@@ -95,12 +98,14 @@ static void send_arp_request(struct sr_instance *sr, struct sr_arpreq *req, time
   req->times_sent++;
 }
 
+
 /*
   This function gets called every second. For each request sent out, we keep
   checking whether we should resend an request or destroy the arp request.
   See the comments in the header file for an idea of what it should look like.
 */
 void sr_arpcache_sweepreqs(struct sr_instance *sr) {
+
   struct sr_arpreq *req = sr->cache.requests;
   time_t now = time(NULL);
   while (req) {
@@ -120,6 +125,7 @@ void sr_arpcache_sweepreqs(struct sr_instance *sr) {
     req = next;
   }
 }
+
 
 /* You should not need to touch the rest of this code. */
 

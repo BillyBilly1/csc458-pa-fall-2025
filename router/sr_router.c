@@ -11,6 +11,8 @@
 #include "sr_rt.h"
 #include "sr_utils.h"
 
+/* this are helpers */
+
 
 static void handle_arp(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface) {
   if (len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t)) {
@@ -21,6 +23,7 @@ static void handle_arp(struct sr_instance *sr, uint8_t *packet, unsigned int len
 
   if (ntohs(arp->ar_op) == arp_op_request) {
     struct sr_if *iface = sr_get_interface(sr, interface);
+
     if (iface && arp->ar_tip == iface->ip) {
       uint8_t reply_packet[sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t)];
       sr_ethernet_hdr_t *eth_reply = (sr_ethernet_hdr_t *)reply_packet;
@@ -45,9 +48,11 @@ static void handle_arp(struct sr_instance *sr, uint8_t *packet, unsigned int len
   } else if (ntohs(arp->ar_op) == arp_op_reply) {
     sr_arpcache_insert(&sr->cache, arp->ar_sha, arp->ar_sip);
   }
+
 }
 
 static void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len, struct sr_if *iface) {
+
   uint8_t reply[len];
   memcpy(reply, packet, len);
 
@@ -57,6 +62,7 @@ static void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *packet, unsign
 
   memcpy(eth_r->ether_dhost, eth_r->ether_shost, ETHER_ADDR_LEN);
   memcpy(eth_r->ether_shost, iface->addr, ETHER_ADDR_LEN);
+
 
   uint32_t temp = ip_r->ip_src;
   ip_r->ip_src = ip_r->ip_dst;
@@ -72,7 +78,9 @@ static void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *packet, unsign
   sr_send_packet(sr, reply, len, iface->name);
 }
 
+
 static void send_icmp_t3(struct sr_instance *sr, uint8_t *packet, char *interface, uint8_t type, uint8_t code) {
+
   uint8_t buf[sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t)];
   sr_ethernet_hdr_t *eth_r = (sr_ethernet_hdr_t *)buf;
   sr_ip_hdr_t *ip_r = (sr_ip_hdr_t *)(buf + sizeof(sr_ethernet_hdr_t));
@@ -108,11 +116,9 @@ static void send_icmp_t3(struct sr_instance *sr, uint8_t *packet, char *interfac
   sr_send_packet(sr, buf, sizeof(buf), out_if->name);
 }
 
-static void send_icmp_t11(struct sr_instance *sr, uint8_t *packet, char *interface) {
-  send_icmp_t3(sr, packet, interface, 11, 0);
-}
 
 static struct sr_rt *longest_prefix_match(struct sr_instance *sr, uint32_t ip_dst) {
+
   struct sr_rt *best = NULL;
   for (struct sr_rt *rt = sr->routing_table; rt; rt = rt->next) {
     if ((ip_dst & rt->mask.s_addr) == (rt->dest.s_addr & rt->mask.s_addr)) {
@@ -125,6 +131,7 @@ static struct sr_rt *longest_prefix_match(struct sr_instance *sr, uint32_t ip_ds
 }
 
 static void handle_ip(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface) {
+
   if (len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) {
     return;
   }
@@ -167,7 +174,7 @@ static void handle_ip(struct sr_instance *sr, uint8_t *packet, unsigned int len,
   }
 
   if (ip->ip_ttl <= 1) {
-    send_icmp_t11(sr, packet, interface);
+  	send_icmp_t3(sr, packet, interface, 11, 0);
     return;
   }
 
@@ -193,6 +200,7 @@ static void handle_ip(struct sr_instance *sr, uint8_t *packet, unsigned int len,
   } else {
     sr_arpcache_queuereq(&sr->cache, next_hop_ip, packet, len, out_if->name);
   }
+
 }
 
 /*---------------------------------------------------------------------

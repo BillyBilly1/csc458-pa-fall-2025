@@ -293,19 +293,22 @@ void sr_handlepacket(struct sr_instance *sr, uint8_t *packet /* lent */,
     return;
   }
 
-  uint32_t next_hop_ip = best->gw.s_addr == 0 ? ip->ip_dst : best->gw.s_addr;
-  struct sr_arpentry *entry = sr_arpcache_lookup(&sr->cache, next_hop_ip);
-  struct sr_if *out_if = sr_get_interface(sr, best->interface);
+struct sr_if *out_if = sr_get_interface(sr, best->interface);
+if (!out_if) return;
 
-
-  if (entry) {
+uint32_t next_hop_ip = best->gw.s_addr == 0 ? ip->ip_dst : best->gw.s_addr;
+struct sr_arpentry *entry = sr_arpcache_lookup(&sr->cache, next_hop_ip);
+if (entry) {
     memcpy(eth->ether_shost, out_if->addr, ETHER_ADDR_LEN);
     memcpy(eth->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+    ip->ip_ttl -= 1;
+    ip->ip_sum = 0;
+    ip->ip_sum = cksum(ip, ip->ip_hl * 4);
     sr_send_packet(sr, packet, len, out_if->name);
     free(entry);
-  } else {
-  sr_arpcache_queuereq(&sr->cache, next_hop_ip, packet, len, out_if->name);
-  }
-
-
+} else {
+    ip->ip_ttl -= 1;
+    ip->ip_sum = 0;
+    ip->ip_sum = cksum(ip, ip->ip_hl * 4);
+    sr_arpcache_queuereq(&sr->cache, next_hop_ip, packet, len, out_if->name);}
 } /* end sr_ForwardPacket */

@@ -1,4 +1,6 @@
 #include "sr_arpcache.h"
+#include "sr_utils.h"
+
 
 #include <netinet/in.h>
 #include <pthread.h>
@@ -8,6 +10,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
 
 #include "sr_if.h"
 #include "sr_protocol.h"

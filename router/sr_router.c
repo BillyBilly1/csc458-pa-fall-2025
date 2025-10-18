@@ -23,9 +23,7 @@ static int is_to_me(struct sr_instance *sr, uint32_t ip_dst) {
 /* ======================= ICMP builders ======================= */
 
 static void build_and_send_icmp_t3(struct sr_instance *sr, uint8_t *rx_pkt, unsigned int rx_len, char *in_iface, uint8_t code) {
-  printf("[ICMP-T3] req-iface=%s code=%u rx_len=%u\n", in_iface, code, rx_len);
-  if (rx_len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) { printf("[ICMP-T3] drop: rx too short\n"); return; }
-
+  if (rx_len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) return;
   sr_ethernet_hdr_t *eth = (sr_ethernet_hdr_t *)rx_pkt;
   sr_ip_hdr_t *ip = (sr_ip_hdr_t *)(rx_pkt + sizeof(sr_ethernet_hdr_t));
   uint8_t buf[sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t)];
@@ -33,7 +31,7 @@ static void build_and_send_icmp_t3(struct sr_instance *sr, uint8_t *rx_pkt, unsi
   sr_ip_hdr_t *ip_r = (sr_ip_hdr_t *)(buf + sizeof(sr_ethernet_hdr_t));
   sr_icmp_t3_hdr_t *icmp_r = (sr_icmp_t3_hdr_t *)(buf + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
   struct sr_if *out_if = sr_get_interface(sr, in_iface);
-  if (!out_if) { printf("[ICMP-T3] no out_if for %s\n", in_iface); return; }
+  if (!out_if) return;
 
   memcpy(eth_r->ether_shost, out_if->addr, ETHER_ADDR_LEN);
   memcpy(eth_r->ether_dhost, eth->ether_shost, ETHER_ADDR_LEN);
@@ -54,21 +52,15 @@ static void build_and_send_icmp_t3(struct sr_instance *sr, uint8_t *rx_pkt, unsi
 
   icmp_r->icmp_type = 3;
   icmp_r->icmp_code = code;
-  icmp_r->unused = 0;
-  icmp_r->next_mtu = 0;
   memcpy(icmp_r->data, ip, ICMP_DATA_SIZE);
   icmp_r->icmp_sum = 0;
   icmp_r->icmp_sum = cksum(icmp_r, sizeof(sr_icmp_t3_hdr_t));
 
-  printf("[ICMP-T3] send iface=%s src_ip=%08x dst_ip=%08x\n",
-         out_if->name, ntohl(ip_r->ip_src), ntohl(ip_r->ip_dst));
   sr_send_packet(sr, buf, sizeof(buf), out_if->name);
 }
 
 static void build_and_send_icmp_t11(struct sr_instance *sr, uint8_t *rx_pkt, unsigned int rx_len, char *in_iface) {
-  printf("[ICMP-T11] req-iface=%s rx_len=%u\n", in_iface, rx_len);
   if (rx_len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) return;
-
   sr_ethernet_hdr_t *eth = (sr_ethernet_hdr_t *)rx_pkt;
   sr_ip_hdr_t *ip = (sr_ip_hdr_t *)(rx_pkt + sizeof(sr_ethernet_hdr_t));
   uint8_t buf[sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t)];
@@ -101,13 +93,10 @@ static void build_and_send_icmp_t11(struct sr_instance *sr, uint8_t *rx_pkt, uns
   icmp_r->icmp_sum = 0;
   icmp_r->icmp_sum = cksum(icmp_r, sizeof(sr_icmp_t3_hdr_t));
 
-  printf("[ICMP-T11] send iface=%s src_ip=%08x dst_ip=%08x\n",
-         out_if->name, ntohl(ip_r->ip_src), ntohl(ip_r->ip_dst));
   sr_send_packet(sr, buf, sizeof(buf), out_if->name);
 }
 
 static void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *rx_pkt, unsigned int len, char *in_iface, unsigned int ip_hdr_len) {
-  printf("[ICMP-ECHO] iface=%s len=%u ihl=%u\n", in_iface, len, ip_hdr_len);
   if (len < sizeof(sr_ethernet_hdr_t) + ip_hdr_len + sizeof(sr_icmp_hdr_t)) return;
   sr_ethernet_hdr_t *eth = (sr_ethernet_hdr_t *)rx_pkt;
   struct sr_if *iface = sr_get_interface(sr, in_iface);
@@ -151,16 +140,10 @@ static struct sr_rt *lpm_lookup(struct sr_instance *sr, uint32_t ip_dst) {
       if (len > best_len) { best = rt; best_len = len; }
     }
   }
-  if (best)
-    printf("[LPM] hit dest=%08x gw=%08x masklen=%d iface=%s\n",
-           ntohl(best->dest.s_addr), ntohl(best->gw.s_addr), best_len, best->interface);
-  else
-    printf("[LPM] miss for dst=%08x\n", ntohl(ip_dst));
   return best;
 }
 
 static void forward_packet(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *in_iface) {
-  printf("[FWD] enter len=%u in_iface=%s\n", len, in_iface);
   if (len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) return;
 
   sr_ip_hdr_t *ip = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
@@ -187,13 +170,12 @@ static void forward_packet(struct sr_instance *sr, uint8_t *packet, unsigned int
     memcpy(eth_f->ether_shost, out_if->addr, ETHER_ADDR_LEN);
     memcpy(eth_f->ether_dhost, entry->mac, ETHER_ADDR_LEN);
     eth_f->ether_type = htons(ethertype_ip);
-    printf("[FWD] ARP hit iface=%s next_hop=%08x -> send\n", out_if->name, ntohl(next_hop_ip));
     sr_send_packet(sr, sendbuf, len, out_if->name);
     free(sendbuf);
     free(entry);
   } else {
-    printf("[FWD] ARP miss iface=%s next_hop=%08x -> queue req\n", out_if->name, ntohl(next_hop_ip));
-    sr_arpcache_queuereq(&sr->cache, next_hop_ip, packet, len, out_if->name);
+    struct sr_arpreq *req = sr_arpcache_queuereq(&sr->cache, next_hop_ip, packet, len, out_if->name);
+    if (req) handle_arpreq(sr, req);  // ✅ 主动触发 ARP 请求
   }
 }
 
@@ -208,29 +190,17 @@ void sr_init(struct sr_instance *sr) {
   pthread_attr_setscope(&(sr->attr), PTHREAD_SCOPE_SYSTEM);
   pthread_t thread;
   pthread_create(&thread, &(sr->attr), sr_arpcache_timeout, sr);
-
-  printf("[INIT] Router ready\n");
-  for (struct sr_if *it = sr->if_list; it; it = it->next) {
-    printf("[INIT] iface %s ip=%08x mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
-           it->name, ntohl(it->ip),
-           it->addr[0], it->addr[1], it->addr[2],
-           it->addr[3], it->addr[4], it->addr[5]);
-  }
 }
 
 void sr_handlepacket(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface) {
   assert(sr && packet && interface);
-  printf("*** -> Received packet len=%u iface=%s\n", len, interface);
-
   if (len < sizeof(sr_ethernet_hdr_t)) return;
   sr_ethernet_hdr_t *eth = (sr_ethernet_hdr_t *)packet;
   uint16_t ethtype = ntohs(eth->ether_type);
 
   if (ethtype == ethertype_arp) {
-    printf("[ARP] rx\n");
     if (len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t)) return;
     sr_arp_hdr_t *arp = (sr_arp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
-
     if (ntohs(arp->ar_op) == arp_op_request) {
       struct sr_if *iface = sr_get_interface(sr, interface);
       if (iface && arp->ar_tip == iface->ip) {
@@ -269,7 +239,7 @@ void sr_handlepacket(struct sr_instance *sr, uint8_t *packet, unsigned int len, 
   ip->ip_sum = 0;
   uint16_t calc_sum = cksum(ip, ip_hdr_len);
   ip->ip_sum = old_sum;
-  if (calc_sum != old_sum) { printf("[IP] bad checksum\n"); return; }
+  if (calc_sum != old_sum) return;
 
   if (is_to_me(sr, ip->ip_dst)) {
     if (ip->ip_p == ip_protocol_icmp) {

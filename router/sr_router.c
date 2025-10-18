@@ -3,6 +3,8 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+
 
 #include "sr_arpcache.h"
 #include "sr_if.h"

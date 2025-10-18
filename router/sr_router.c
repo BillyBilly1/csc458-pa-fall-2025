@@ -147,30 +147,60 @@ static void forward_packet(struct sr_instance *sr, uint8_t *packet, unsigned int
   sr_ip_hdr_t *ip = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
   unsigned int ip_hdr_len = ip->ip_hl * 4;
 
-  if (ip->ip_ttl <= 1) { build_and_send_icmp_t11(sr, packet, len, in_iface); return; }
+  printf("[FWD] Processing packet: dst_ip=%08x, src_ip=%08x, proto=%d, ttl=%d\n",
+         ntohl(ip->ip_dst), ntohl(ip->ip_src), ip->ip_p, ip->ip_ttl);
 
+  // 检查TTL
+  if (ip->ip_ttl <= 1) {
+    printf("[FWD] TTL expired, sending ICMP time exceeded\n");
+    build_and_send_icmp_t11(sr, packet, len, in_iface);
+    return;
+  }
+
+  // LPM查找
   struct sr_rt *best = lpm_lookup(sr, ip->ip_dst);
-  if (!best) { build_and_send_icmp_t3(sr, packet, len, in_iface, 0); return; }
+  if (!best) {
+    printf("[FWD] No route found, sending ICMP net unreachable\n");
+    build_and_send_icmp_t3(sr, packet, len, in_iface, 0);
+    return;
+  }
 
   struct sr_if *out_if = sr_get_interface(sr, best->interface);
-  if (!out_if) { printf("[FWD] no out_if found for %s\n", best->interface); return; }
+  if (!out_if) {
+    printf("[FWD] No output interface found for %s\n", best->interface);
+    return;
+  }
 
+  // 计算下一跳IP
+  uint32_t next_hop_ip = (best->gw.s_addr == 0) ? ip->ip_dst : best->gw.s_addr;
+  printf("[FWD] Forwarding via iface=%s, next_hop=%08x\n",
+         out_if->name, ntohl(next_hop_ip));
+
+  // 修改IP头部
   ip->ip_ttl -= 1;
   ip->ip_sum = 0;
   ip->ip_sum = cksum(ip, ip_hdr_len);
-  uint32_t next_hop_ip = best->gw.s_addr == 0 ? ip->ip_dst : best->gw.s_addr;
-  printf("[FWD] via iface=%s ttl=%d next_hop=%08x\n", out_if->name, ip->ip_ttl, ntohl(next_hop_ip));
 
+  // 更新以太网头部
+  memcpy(eth->ether_shost, out_if->addr, ETHER_ADDR_LEN);
+
+  // ARP查找
   struct sr_arpentry *entry = sr_arpcache_lookup(&sr->cache, next_hop_ip);
   if (entry) {
-    printf("[FWD] ARP hit, sending packet len=%u\n", len);
-    memcpy(eth->ether_shost, out_if->addr, ETHER_ADDR_LEN);
+    printf("[FWD] ARP cache hit, sending packet\n");
     memcpy(eth->ether_dhost, entry->mac, ETHER_ADDR_LEN);
     sr_send_packet(sr, packet, len, out_if->name);
     free(entry);
   } else {
-    printf("[FWD] ARP miss, queuing request for %08x\n", ntohl(next_hop_ip));
-    sr_arpcache_queuereq(&sr->cache, next_hop_ip, packet, len, out_if->name);
+    printf("[FWD] ARP cache miss, queuing request\n");
+    // 复制数据包，因为原始数据包会被释放
+    uint8_t *packet_copy = malloc(len);
+    if (!packet_copy) {
+      printf("[FWD] Failed to allocate memory for packet copy\n");
+      return;
+    }
+    memcpy(packet_copy, packet, len);
+    sr_arpcache_queuereq(&sr->cache, next_hop_ip, packet_copy, len, out_if->name);
   }
 }
 
@@ -239,37 +269,48 @@ void sr_handlepacket(struct sr_instance *sr, uint8_t *packet, unsigned int len, 
     return;
   }
 
-  if (ethtype != ethertype_ip) return;
-  if (len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) return;
+  // 在 sr_handlepacket 函数中，修改IP处理部分：
 
-  sr_ip_hdr_t *ip = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
-  unsigned int ip_hdr_len = ip->ip_hl * 4;
-  if (ip_hdr_len < 20) return;
+if (ethtype != ethertype_ip) return;
+if (len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) {
+  printf("[PKT] IP packet too short\n");
+  return;
+}
 
-  uint16_t old_sum = ip->ip_sum;
-  ip->ip_sum = 0;
-  uint16_t calc_sum = cksum(ip, ip_hdr_len);
-  ip->ip_sum = old_sum;
-  if (calc_sum != old_sum) { printf("[PKT] bad checksum\n"); return; }
+sr_ip_hdr_t *ip = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
+unsigned int ip_hdr_len = ip->ip_hl * 4;
 
-  int to_me = is_to_me(sr, ip->ip_dst);
-  if (to_me) {
-    printf("[PKT] IP destined to router\n");
-    if (ip->ip_p == ip_protocol_icmp) {
-      sr_icmp_hdr_t *icmp = (sr_icmp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + ip_hdr_len);
-      if (icmp->icmp_type == 8) {
-        send_icmp_echo_reply(sr, packet, len, interface, ip_hdr_len);
-      }
-    } else {
-      build_and_send_icmp_t3(sr, packet, len, interface, 3);
-    }
-    return;
-  }
+// 验证IP头部长度
+if (ip_hdr_len < 20 || ip_hdr_len > 60) {
+  printf("[PKT] Invalid IP header length: %d\n", ip_hdr_len);
+  return;
+}
 
-  if (ip->ip_ttl <= 1) {
-    build_and_send_icmp_t11(sr, packet, len, interface);
-    return;
-  }
+// 验证数据包长度
+if (len < sizeof(sr_ethernet_hdr_t) + ip_hdr_len) {
+  printf("[PKT] Packet shorter than IP header indicates\n");
+  return;
+}
 
+// 校验和验证
+uint16_t old_sum = ip->ip_sum;
+ip->ip_sum = 0;
+uint16_t calc_sum = cksum(ip, ip_hdr_len);
+ip->ip_sum = old_sum;
+if (calc_sum != old_sum) {
+  printf("[PKT] Bad IP checksum: computed=%04x, received=%04x\n", calc_sum, old_sum);
+  return;
+}
+
+printf("[PKT] Valid IP packet: version=%d, ihl=%d, total_len=%d, proto=%d\n",
+       ip->ip_v, ip->ip_hl, ntohs(ip->ip_len), ip->ip_p);
+
+int to_me = is_to_me(sr, ip->ip_dst);
+if (to_me) {
+  printf("[PKT] Packet destined to router\n");
+  // 处理发送到路由器的数据包...
+} else {
+  printf("[PKT] Packet needs forwarding\n");
+  // 转发数据包
   forward_packet(sr, packet, len, interface);
 }

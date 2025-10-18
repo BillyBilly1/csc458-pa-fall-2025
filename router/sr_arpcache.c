@@ -1,6 +1,8 @@
 #include "sr_arpcache.h"
 #include "sr_utils.h"
-
+#include "sr_if.h"
+#include "sr_protocol.h"
+#include "sr_router.h"
 
 #include <netinet/in.h>
 #include <pthread.h>
@@ -11,16 +13,45 @@
 #include <time.h>
 #include <unistd.h>
 
+void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
+    time_t now = time(NULL);
+    if (difftime(now, req->sent) >= 1.0) {
+        if (req->times_sent >= 5) {
+            struct sr_packet *pkt = req->packets;
+            while (pkt) {
+                printf("[ARP] Host unreachable, dropping queued packet.\n");
+                pkt = pkt->next;
+            }
+            sr_arpreq_destroy(&sr->cache, req);
+        } else {
+            struct sr_if *iface = sr_get_interface(sr, req->packets->iface);
+            if (!iface) return;
+            uint8_t arp_req[sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t)];
+            sr_ethernet_hdr_t *eth = (sr_ethernet_hdr_t *)arp_req;
+            sr_arp_hdr_t *arp = (sr_arp_hdr_t *)(arp_req + sizeof(sr_ethernet_hdr_t));
 
-#include "sr_if.h"
-#include "sr_protocol.h"
-#include "sr_router.h"
+            memset(eth->ether_dhost, 0xff, ETHER_ADDR_LEN);
+            memcpy(eth->ether_shost, iface->addr, ETHER_ADDR_LEN);
+            eth->ether_type = htons(ethertype_arp);
 
-/*
-  This function gets called every second. For each request sent out, we keep
-  checking whether we should resend an request or destroy the arp request.
-  See the comments in the header file for an idea of what it should look like.
-*/
+            arp->ar_hrd = htons(arp_hrd_ethernet);
+            arp->ar_pro = htons(ethertype_ip);
+            arp->ar_hln = ETHER_ADDR_LEN;
+            arp->ar_pln = 4;
+            arp->ar_op = htons(arp_op_request);
+            memcpy(arp->ar_sha, iface->addr, ETHER_ADDR_LEN);
+            arp->ar_sip = iface->ip;
+            memset(arp->ar_tha, 0x00, ETHER_ADDR_LEN);
+            arp->ar_tip = req->ip;
+
+            sr_send_packet(sr, arp_req, sizeof(arp_req), iface->name);
+            req->sent = now;
+            req->times_sent++;
+        }
+    }
+}
+
+
 void sr_arpcache_sweepreqs(struct sr_instance *sr) {
   struct sr_arpreq *req = sr->cache.requests;
   time_t now = time(NULL);

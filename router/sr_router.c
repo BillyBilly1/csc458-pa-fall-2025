@@ -10,8 +10,8 @@
 #include "sr_protocol.h"
 #include "sr_rt.h"
 #include "sr_utils.h"
-void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req);
 
+void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req);
 
 static int is_to_me(struct sr_instance *sr, uint32_t ip_dst) {
   struct sr_if *iface = sr->if_list;
@@ -21,8 +21,6 @@ static int is_to_me(struct sr_instance *sr, uint32_t ip_dst) {
   }
   return 0;
 }
-
-/* ======================= ICMP builders ======================= */
 
 static void build_and_send_icmp_t3(struct sr_instance *sr, uint8_t *rx_pkt, unsigned int rx_len, char *in_iface, uint8_t code) {
   if (rx_len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) return;
@@ -125,8 +123,6 @@ static void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *rx_pkt, unsign
   sr_send_packet(sr, reply, len, iface->name);
 }
 
-/* ======================= LPM + Forward ======================= */
-
 static int mask_bitcount(uint32_t mask) {
   int c = 0;
   for (int i = 0; i < 32; i++) if (mask & (1 << i)) c++;
@@ -147,11 +143,9 @@ static struct sr_rt *lpm_lookup(struct sr_instance *sr, uint32_t ip_dst) {
 
 static void forward_packet(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *in_iface) {
   if (len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) return;
-
   sr_ip_hdr_t *ip = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
   unsigned int ip_hdr_len = ip->ip_hl * 4;
   if (ip->ip_ttl <= 1) { build_and_send_icmp_t11(sr, packet, len, in_iface); return; }
-
   struct sr_rt *best = lpm_lookup(sr, ip->ip_dst);
   if (!best) { build_and_send_icmp_t3(sr, packet, len, in_iface, 0); return; }
 
@@ -164,7 +158,6 @@ static void forward_packet(struct sr_instance *sr, uint8_t *packet, unsigned int
 
   uint32_t next_hop_ip = (best->gw.s_addr == 0) ? ip->ip_dst : best->gw.s_addr;
   struct sr_arpentry *entry = sr_arpcache_lookup(&sr->cache, next_hop_ip);
-
   if (entry) {
     uint8_t *sendbuf = malloc(len);
     memcpy(sendbuf, packet, len);
@@ -177,11 +170,9 @@ static void forward_packet(struct sr_instance *sr, uint8_t *packet, unsigned int
     free(entry);
   } else {
     struct sr_arpreq *req = sr_arpcache_queuereq(&sr->cache, next_hop_ip, packet, len, out_if->name);
-    if (req) handle_arpreq(sr, req);  // ✅ 主动触发 ARP 请求
+    if (req) handle_arpreq(sr, req);
   }
 }
-
-/* ======================= Init & Handler ======================= */
 
 void sr_init(struct sr_instance *sr) {
   setvbuf(stdout, NULL, _IONBF, 0);

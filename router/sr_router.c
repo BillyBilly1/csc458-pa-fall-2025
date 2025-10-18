@@ -10,6 +10,8 @@
 #include "sr_protocol.h"
 #include "sr_rt.h"
 #include "sr_utils.h"
+void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req);
+
 
 static int is_to_me(struct sr_instance *sr, uint32_t ip_dst) {
   struct sr_if *iface = sr->if_list;

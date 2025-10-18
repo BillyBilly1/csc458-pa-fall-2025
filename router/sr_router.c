@@ -171,6 +171,8 @@ static void forward_packet(struct sr_instance *sr, uint8_t *packet, unsigned int
  *---------------------------------------------------------------------*/
 
 void sr_init(struct sr_instance *sr) {
+  setvbuf(stdout, NULL, _IONBF, 0);
+
   /* REQUIRES */
   assert(sr);
 
